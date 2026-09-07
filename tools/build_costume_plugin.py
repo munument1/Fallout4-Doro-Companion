@@ -9,14 +9,15 @@ def sub(s,v):return s.encode()+struct.pack('<H',len(v))+v
 def rec(t,f,ss,flags=0):
  b=b''.join(sub(s,v) for s,v in ss);return struct.pack('<4sIIIIHH',t.encode(),len(b),flags,f,0,131,0)+b
 def group(t,b):return struct.pack('<4sI4siIHH',b'GRUP',len(b)+24,t.encode(),0,0,0,0)+b
-ids={0x11e46d,0x11e46c,0x1c32c8,0x212db7,0x102150}
+ids={0x11e46d,0x11e46c,0x1c32c8,0x212db7,0x6980c}
 van={f:list(subs(b)) for t,f,flags,b in records(GAME/'Data/Fallout4.esm') if f in ids}
 def clone(f,replace,drop=()):return [(s,replace.get(s,v)) for s,v in van[f] if s not in drop]
 own=lambda n:0x1000000+n
 helmet,hAA,dog,dAA,category,hRecipe,dRecipe=map(own,range(0x800,0x807))
 pool=collections.defaultdict(list)
 def add(t,f,ss):pool[t].append(rec(t,f,ss))
-add('KYWD',category,clone(0x102150,{'EDID':S('DoroRecipeCategory'),'FULL':S('DORO')}))
+# Clone the vanilla RecipeUtility keyword so TNAM remains the Recipe Filter type.
+add('KYWD',category,clone(0x6980c,{'EDID':S('DoroRecipeCategory'),'FULL':S('DORO')}))
 base='Armor\\DoroCostumes\\'
 for fid,baseid,name,aa,race,mask,path,weight in [(helmet,0x11e46d,'Doro Mascot Head',hAA,0x13746,7,'DoroHelmet.nif',1.),(dog,0x1c32c8,'Doro Dogmeat Costume',dAA,0x1d698,(1<<3)|(1<<11)|(1<<16)|(1<<20),'DoroDogSuit.nif',2.)]:
  ss=clone(baseid,{'EDID':S('DoroHelmet' if fid==helmet else 'DoroDogSuit'),'FULL':S(name),'DESC':S(''),'BOD2':U(mask),'RNAM':U(race),'MOD2':S(base+'DoroHelmetGO.nif'),'DATA':struct.pack('<IfI',0,weight,0),'FNAM':b'\0'*8},['MO2T','INDX','MODL','PTRN'])
@@ -30,8 +31,16 @@ for fid,item,name in [(hRecipe,helmet,'DoroRecipeHelmet'),(dRecipe,dog,'DoroReci
 count=sum(map(len,pool.values()));header=rec('TES4',0,[('HEDR',struct.pack('<fII',1.,count,0x807)),('CNAM',S('Doro costumes')),('SNAM',S('Free chemistry crafting: Dogmeat costume and player mascot head.')),('MAST',S('Fallout4.esm')),('DATA',b'\0'*8)],0x200)
 (out/'DoroCostumes.esp').write_bytes(header+b''.join(group(t,b''.join(v)) for t,v in pool.items()))
 rows=list(records(out/'DoroCostumes.esp'));assert len(rows)==8
+recipe_filter_tnam=dict(van[0x6980c]).get('TNAM')
+category_checked=False
 for t,f,fl,b in rows:
+ ss=dict(subs(b))
+ if t=='KYWD' and f==category:
+  assert recipe_filter_tnam is not None
+  assert ss.get('TNAM')==recipe_filter_tnam
+  category_checked=True
  if t=='COBJ':
-  ss=dict(subs(b));assert not any(s in ss for s in ['FVPA','CTDA','COCT','CNTO']);assert ss['BNAM']==U(0x102158)
-(r/'build/costume_plugin_validation.json').write_text(json.dumps({'records':len(rows),'recipes':2,'ingredient_and_perk_requirements':0,'master':'Fallout4.esm','esl_flagged':True,'ingame_tested':False},indent=2))
+  assert not any(s in ss for s in ['FVPA','CTDA','COCT','CNTO']);assert ss['BNAM']==U(0x102158);assert ss['FNAM']==U(category)
+assert category_checked
+(r/'build/costume_plugin_validation.json').write_text(json.dumps({'records':len(rows),'recipes':2,'ingredient_and_perk_requirements':0,'master':'Fallout4.esm','esl_flagged':True,'recipe_filter_donor':'RecipeUtility [KYWD:0006980C]','chemistry_workbench':'WorkbenchChemlab [KYWD:00102158]','ingame_tested':False},indent=2))
 print('COSTUME_PLUGIN_OK',len(rows))
