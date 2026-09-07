@@ -25,7 +25,44 @@ jobs:
           New-Item -ItemType Directory -Force -Path $capricaDir | Out-Null
           7z x $capricaArchive "-o$capricaDir" -y
           git clone --depth 1 https://github.com/ianpatt/f4se.git (Join-Path $env:RUNNER_TEMP 'f4se')
-          Get-ChildItem -Recurse $capricaDir
+
+      - name: Create Fallout 4 Papyrus flags file
+        shell: pwsh
+        run: |
+          $flags = @'
+          // List of flags for Institute - DO NOT EDIT
+          Flag Hidden 0
+          {
+              Script
+              Property
+              StructVar
+          }
+          Flag Conditional 1
+          {
+              Script
+              Variable
+          }
+          Flag Default 2
+          {
+              Script
+          }
+          Flag CollapsedOnRef 3
+          {
+              Group
+          }
+          Flag CollapsedOnBase 4
+          {
+              Group
+          }
+          Flag Collapsed CollapsedOnRef & CollapsedOnBase
+          Flag Mandatory 5
+          {
+              Property
+          }
+          '@
+          $flagsPath = Join-Path $env:RUNNER_TEMP 'Institute_Papyrus_Flags.flg'
+          Set-Content -Path $flagsPath -Value $flags -Encoding ASCII
+          Get-Content $flagsPath
 
       - name: Compile DoroCompanionScript
         shell: pwsh
@@ -34,9 +71,10 @@ jobs:
           $caprica = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP 'caprica') -Filter 'Caprica.exe' -Recurse | Select-Object -First 1
           if (-not $caprica) { throw 'Caprica.exe not found' }
           $vanilla = Join-Path $env:RUNNER_TEMP 'f4se\scripts\vanilla'
+          $flags = Join-Path $env:RUNNER_TEMP 'Institute_Papyrus_Flags.flg'
           $out = Join-Path $pwd 'build\pex'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          & $caprica.FullName --game=fallout4 --import $vanilla --import (Join-Path $pwd 'tools') --output $out --strict=false (Join-Path $pwd 'tools\DoroCompanionScript.psc')
+          & $caprica.FullName --game=fallout4 --flags $flags --import $vanilla --import (Join-Path $pwd 'tools') --output $out --strict=false (Join-Path $pwd 'tools\DoroCompanionScript.psc')
           if ($LASTEXITCODE -ne 0) { throw "Caprica failed with exit code $LASTEXITCODE" }
           if (-not (Test-Path (Join-Path $out 'DoroCompanionScript.pex'))) { throw 'DoroCompanionScript.pex was not produced' }
           Get-FileHash (Join-Path $out 'DoroCompanionScript.pex') -Algorithm SHA256
