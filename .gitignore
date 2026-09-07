@@ -1,0 +1,11 @@
+# Public source checkpoint: local assets and dependencies stay on this machine.
+/*
+!/.gitignore
+!/README.md
+!/docs/
+!/tools/
+/tools/*
+!/tools/*.py
+!/tools/*.psc
+/tools/__pycache__/
+*.pyc
