@@ -4,8 +4,9 @@ import hashlib,json,zipfile
 root=Path(__file__).resolve().parent.parent
 follower=root/'build/DoroFollower'
 costumes=root/'build/DoroCostumes'
-out=root/'build/Doro_FO4_test_0.2.5_combined.zip'
+out=root/'build/Doro_FO4_test_0.2.5.zip'
 
+# One plugin only: DoroFollower.esp contains follower, dialogue and all costume recipes.
 files={
     follower/'DoroFollower.esp':'DoroFollower.esp',
     follower/'Scripts/DoroCompanionScript.pex':'Scripts/DoroCompanionScript.pex',
@@ -17,7 +18,6 @@ files={
     follower/'Textures/Actors/Doro/Doro_s.dds':'Textures/Actors/Doro/Doro_s.dds',
     follower/'Sound/FX/Doro/Doro01.wav':'Sound/FX/Doro/Doro01.wav',
     follower/'Sound/FX/Doro/Doro02.wav':'Sound/FX/Doro/Doro02.wav',
-    costumes/'DoroCostumes.esp':'DoroCostumes.esp',
     costumes/'Meshes/Armor/DoroCostumes/DoroHelmet.nif':'Meshes/Armor/DoroCostumes/DoroHelmet.nif',
     costumes/'Meshes/Armor/DoroCostumes/DoroHelmetGO.nif':'Meshes/Armor/DoroCostumes/DoroHelmetGO.nif',
     costumes/'Meshes/Armor/DoroCostumes/DoroDogSuit.nif':'Meshes/Armor/DoroCostumes/DoroDogSuit.nif',
@@ -45,10 +45,12 @@ with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
 
 with zipfile.ZipFile(out) as z:
     assert z.testzip() is None
-    names=set(z.namelist())
-    assert 'DoroFollower.esp' in names
-    assert 'DoroCostumes.esp' in names
+    names=z.namelist()
+    assert names.count('DoroFollower.esp')==1
+    assert not any(name.lower().endswith('.esp') and name!='DoroFollower.esp' for name in names)
     assert 'Scripts/DoroCompanionScript.pex' in names
     assert 'Scripts/DoroDialogueQuestScript.pex' in names
+    assert 'Meshes/Armor/DoroCostumes/DoroHelmet.nif' in names
+    assert 'Meshes/Armor/DoroCostumes/DoroDogSuit.nif' in names
 
-print('PACKAGE_OK',out,out.stat().st_size)
+print('PACKAGE_OK_SINGLE_ESP_FE',out,out.stat().st_size)
