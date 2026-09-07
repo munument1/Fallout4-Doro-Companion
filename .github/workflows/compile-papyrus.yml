@@ -1,0 +1,49 @@
+name: Compile Doro Papyrus
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/*.psc'
+      - '.github/workflows/compile-papyrus.yml'
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Caprica and Fallout 4 vanilla Papyrus sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $capricaArchive = Join-Path $env:RUNNER_TEMP 'Caprica.v0.3.0.7z'
+          $capricaDir = Join-Path $env:RUNNER_TEMP 'caprica'
+          Invoke-WebRequest -Uri 'https://github.com/Orvid/Caprica/releases/download/v0.3.0/Caprica.v0.3.0.7z' -OutFile $capricaArchive
+          New-Item -ItemType Directory -Force -Path $capricaDir | Out-Null
+          7z x $capricaArchive "-o$capricaDir" -y
+          git clone --depth 1 https://github.com/ianpatt/f4se.git (Join-Path $env:RUNNER_TEMP 'f4se')
+          Get-ChildItem -Recurse $capricaDir
+
+      - name: Compile DoroCompanionScript
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $caprica = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP 'caprica') -Filter 'Caprica.exe' -Recurse | Select-Object -First 1
+          if (-not $caprica) { throw 'Caprica.exe not found' }
+          $vanilla = Join-Path $env:RUNNER_TEMP 'f4se\scripts\vanilla'
+          $out = Join-Path $pwd 'build\pex'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & $caprica.FullName --game=fallout4 --import $vanilla --import (Join-Path $pwd 'tools') --output $out --strict=false (Join-Path $pwd 'tools\DoroCompanionScript.psc')
+          if ($LASTEXITCODE -ne 0) { throw "Caprica failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path (Join-Path $out 'DoroCompanionScript.pex'))) { throw 'DoroCompanionScript.pex was not produced' }
+          Get-FileHash (Join-Path $out 'DoroCompanionScript.pex') -Algorithm SHA256
+
+      - name: Upload compiled PEX
+        uses: actions/upload-artifact@v4
+        with:
+          name: doro-papyrus-pex
+          path: build/pex/DoroCompanionScript.pex
+          if-no-files-found: error
