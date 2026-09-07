@@ -58,15 +58,18 @@ rig.hide_set(True)
 hrig=import_rig(r/'reference/costumes/human_skeleton.nif','DoroHelmet_Human_Rig')
 headsource=[source['Doro_Face'],source['Doro_Hair']];pts=[v.co for o in headsource for v in o.data.vertices]
 ycenter=(max(p.y for p in pts)+min(p.y for p in pts))/2;zmin=min(p.z for p in pts)
+# 0.2.5-test3: lower the worn mascot head by 18 units (112 -> 94) so it sits
+# around the player's head/neck instead of floating above the shoulders.
+HELMET_Z=94
 head=[]
 for src in headsource:
- head.append(duplicate(src,src.name+'_Helmet',hrig,lambda v:Vector((v.x*.42,(v.y-ycenter)*.42-1,(v.z-zmin)*.42+112)),lambda v,d:{'HEAD':1.}))
+ head.append(duplicate(src,src.name+'_Helmet',hrig,lambda v:Vector((v.x*.42,(v.y-ycenter)*.42-1,(v.z-zmin)*.42+HELMET_Z)),lambda v,d:{'HEAD':1.}))
 export('DoroHelmet.nif',head,hrig)
 # Ground/inventory display mesh at origin; no armature or actor reference is required.
 ground=[]
 for src in head:
  g=src.copy();g.data=src.data.copy();bpy.context.collection.objects.link(g);g.name=src.name+'_Ground';g.modifiers.clear();g.vertex_groups.clear()
- for v in g.data.vertices:v.co.z-=112
+ for v in g.data.vertices:v.co.z-=HELMET_Z
  ground.append(g)
 export('DoroHelmetGO.nif',ground)
 for o in ground:o.hide_set(True);o.hide_render=True
@@ -74,9 +77,9 @@ for o in ground:o.hide_set(True);o.hide_render=True
 scene=bpy.context.scene
 for o in bpy.data.objects:
  if o.type=='LIGHT':o.hide_render=False;o.hide_set(False)
-floor=bpy.data.objects['Studio floor'];floor.hide_render=False;floor.hide_set(False);floor.location.z=96
+floor=bpy.data.objects['Studio floor'];floor.hide_render=False;floor.hide_set(False);floor.location.z=78
 for o in head:o.hide_set(False);o.hide_render=False
-scene.camera.location=(85,120,145);scene.camera.rotation_euler=(Vector((0,0,130))-scene.camera.location).to_track_quat('-Z','Y').to_euler();scene.camera.data.ortho_scale=85
+scene.camera.location=(85,120,127);scene.camera.rotation_euler=(Vector((0,0,112))-scene.camera.location).to_track_quat('-Z','Y').to_euler();scene.camera.data.ortho_scale=85
 scene.render.resolution_x=640;scene.render.resolution_y=640;scene.cycles.samples=20
 scene.render.filepath=str(r/'build/doro_helmet_preview.png');bpy.ops.render.render(write_still=True)
 bpy.ops.wm.save_as_mainfile(filepath=str(r/'build/DoroCostumes.blend'))
