@@ -12,7 +12,9 @@ Function Setup()
     voice = Game.GetFormFromFile(0x00000809, "DoroFollower.esp") as Sound
     playerFaction = Game.GetForm(0x0001C21C) as Faction
 
-    BlockActivation(false, false)
+    ; Doro uses the script-driven command menu. Block the broken native
+    ; Greeting/Scene activation path, but keep the activation prompt visible.
+    BlockActivation(true, false)
     AllowPCDialogue(true)
     SetEssential(true)
     SetRelationshipRank(Game.GetPlayer(), 4)
@@ -124,7 +126,8 @@ Function RetaliateAgainst(Actor target)
     if IsFriendlyTarget(target)
         return
     endif
-    StopCombatAlarm()
+    ; Do not clear the combat alarm here. StartCombat is the authoritative
+    ; transition and is forced so a hit always produces retaliation.
     StartCombat(target, true)
     EvaluatePackage(true)
 EndFunction
