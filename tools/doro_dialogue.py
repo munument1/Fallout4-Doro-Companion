@@ -1,12 +1,15 @@
 import struct,json
 from pathlib import Path
 
+
 def build_dialogue(add,clone,own,U,F,S,rec,group,placed,npc,voice):
  donor={int(r['id'],16):[(s,bytes.fromhex(v)) for s,v in r['subrecords']] for r in json.loads((Path(__file__).resolve().parent.parent/'build/gorilla_records.json').read_text())}
  quest,scene,stay,vtyp=map(own,[0x80c,0x80d,0x82a,0x82b])
  name=b'DoroDialogueQuestScript'
  vmad=struct.pack('<HHHH',6,2,1,len(name))+name+b'\0'+struct.pack('<H',0)+struct.pack('<BH',3,0)+struct.pack('<H',0)+struct.pack('<H',0)
- ss=[('EDID',S('DoroDialogueQuest')),('VMAD',vmad),('DNAM',struct.pack('<HBBfB3s',0x119,70,0,0.,0,b'\0'*3)),('NEXT',b'')]
+ # Fallout 4 requires HasDialogueData (0x8000) on QUST records that own dialogue.
+ quest_flags=0x8119
+ ss=[('EDID',S('DoroDialogueQuest')),('VMAD',vmad),('DNAM',struct.pack('<HBBfB3s',quest_flags,70,0,0.,0,b'\0'*3)),('NEXT',b'')]
  for stage,label in [(10,'Follow'),(20,'Wait'),(30,'Trade'),(40,'Dismiss')]:ss.extend([('INDX',struct.pack('<HBB',stage,0,0)),('QSDT',b'\0'),('NAM2',S(label))])
  ss.extend([('ANAM',U(1)),('ALST',U(0)),('ALID',S('Doro')),('FNAM',U(0x28a)),('ALUA',U(npc)),('VTCK',U(0)),('ALED',b'')]);add('QUST',quest,ss)
  add('VTYP',vtyp,[('EDID',S('DoroDialogueVoice')),('DNAM',b'\0')])
