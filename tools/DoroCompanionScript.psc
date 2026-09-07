@@ -4,35 +4,30 @@ GlobalVariable mode
 Message commands
 Sound voice
 Bool menuOpen = false
-Quest dialogueQuest
-Scene dialogueScene
+Faction playerFaction
 
 Function Setup()
     mode = Game.GetFormFromFile(0x00000804, "DoroFollower.esp") as GlobalVariable
+    commands = Game.GetFormFromFile(0x00000805, "DoroFollower.esp") as Message
     voice = Game.GetFormFromFile(0x00000809, "DoroFollower.esp") as Sound
-    dialogueQuest = Game.GetFormFromFile(0x0000080C, "DoroFollower.esp") as Quest
-    dialogueScene = Game.GetFormFromFile(0x0000080D, "DoroFollower.esp") as Scene
+    playerFaction = Game.GetForm(0x0001C21C) as Faction
+
     BlockActivation(false, false)
     AllowPCDialogue(true)
     SetEssential(true)
     SetRelationshipRank(Game.GetPlayer(), 4)
+    SetCanDoCommand(true)
+
     if mode != None && mode.GetValue() > 0.0
-        SetPlayerTeammate(true, false, true)
+        SetPlayerTeammate(true, true, true)
     endif
+
     menuOpen = false
-    if dialogueQuest != None && !dialogueQuest.IsRunning()
-        dialogueQuest.Start()
-    endif
-    if dialogueQuest != None && dialogueQuest.IsRunning()
-        ReferenceAlias speaker = dialogueQuest.GetAlias(0) as ReferenceAlias
-        if speaker != None && speaker.GetReference() != Self
-            speaker.ForceRefTo(Self)
-        endif
-    endif
     RegisterForHitEvent(Self)
     RegisterForRemoteEvent(Game.GetPlayer(), "OnPlayerLoadGame")
-    EvaluatePackage()
-    StartTimer(3.0, 1)
+    CancelTimer(1)
+    EvaluatePackage(true)
+    StartTimer(1.0, 1)
 EndFunction
 
 Event OnInit()
@@ -48,98 +43,136 @@ Event Actor.OnPlayerLoadGame(Actor akSender)
 EndEvent
 
 Event OnActivate(ObjectReference akActionRef)
-    if akActionRef != Game.GetPlayer() || IsInCombat()
+    if akActionRef != Game.GetPlayer() || IsInCombat() || menuOpen
         return
     endif
-    if dialogueQuest == None || !dialogueQuest.IsRunning()
+
+    if commands == None || mode == None
         Setup()
     endif
-    AllowPCDialogue(true)
+
     if voice != None
         voice.Play(Self)
     endif
-    if dialogueQuest == None
-        Debug.Notification("Doro: dialogue quest missing from ESP (0.2.5).")
+
+    if commands == None
+        Debug.Notification("Doro: command menu missing from DoroFollower.esp")
         return
     endif
-    if !dialogueQuest.IsRunning()
-        Debug.Notification("Doro: quest present but startup failed (0.2.5).")
-        return
-    endif
-    if !IsInDialogueWithPlayer() && dialogueScene != None && !dialogueScene.IsPlaying()
-        ; First let native activation select the Greeting and establish the dialogue target.
-        ; Default-processing-only prevents a recursive OnActivate event.
-        Activate(Game.GetPlayer(), true)
-        Utility.Wait(0.15)
-        ; If Greeting did not enter the player-dialogue scene, start the bound scene directly.
-        if !IsInDialogueWithPlayer() && !dialogueScene.IsPlaying()
-            dialogueScene.Start()
-        endif
+
+    menuOpen = true
+    int choice = commands.Show()
+    menuOpen = false
+
+    if choice == 0
+        DoCommand(10)
+    elseif choice == 1
+        DoCommand(20)
+    elseif choice == 2
+        DoCommand(30)
+    elseif choice == 3
+        DoCommand(40)
     endif
 EndEvent
 
 Function DoCommand(int choice)
+    if mode == None
+        mode = Game.GetFormFromFile(0x00000804, "DoroFollower.esp") as GlobalVariable
+    endif
+    if mode == None
+        return
+    endif
+
     if choice == 10
         mode.SetValue(1.0)
-        SetPlayerTeammate(true, false, true)
+        SetPlayerTeammate(true, true, true)
+        SetCanDoCommand(true)
     elseif choice == 20
         mode.SetValue(2.0)
-        SetPlayerTeammate(true, false, true)
+        SetPlayerTeammate(true, true, true)
+        SetCanDoCommand(true)
     elseif choice == 30
-        Utility.Wait(0.5)
         OpenInventory(true)
     elseif choice == 40
         mode.SetValue(0.0)
         SetPlayerTeammate(false)
+        SetDoingFavor(false)
         StopCombat()
         MoveToMyEditorLocation()
     endif
-    EvaluatePackage()
+
+    EvaluatePackage(true)
 EndFunction
 
-Function AssistAgainst(Actor target)
+Bool Function IsFriendlyTarget(Actor target)
     if target == None || target == Self || target == Game.GetPlayer()
-        return
+        return true
     endif
     if target.IsDead() || target.IsPlayerTeammate()
+        return true
+    endif
+    if playerFaction != None && target.IsInFaction(playerFaction)
+        return true
+    endif
+    if target.GetRelationshipRank(Game.GetPlayer()) > 0
+        return true
+    endif
+    return false
+EndFunction
+
+Function RetaliateAgainst(Actor target)
+    if IsFriendlyTarget(target)
         return
     endif
-    Faction playerFaction = Game.GetForm(0x0001C21C) as Faction
-    if target.IsInFaction(playerFaction) || target.GetRelationshipRank(Game.GetPlayer()) > 0
+    StopCombatAlarm()
+    StartCombat(target, true)
+    EvaluatePackage(true)
+EndFunction
+
+Function AssistPlayerAgainst(Actor target)
+    if IsFriendlyTarget(target)
         return
     endif
     if target.IsHostileToActor(Game.GetPlayer())
-        if GetCombatTarget() != target
-            StartCombat(target)
-        endif
+        StartCombat(target, true)
+        EvaluatePackage(true)
     endif
 EndFunction
 
 Event OnHit(ObjectReference akTarget, ObjectReference akAggressor, Form akSource, Projectile akProjectile, bool abPowerAttack, bool abSneakAttack, bool abBashAttack, bool abHitBlocked, string asMaterialName)
     RegisterForHitEvent(Self)
-    AssistAgainst(akAggressor as Actor)
+    RetaliateAgainst(akAggressor as Actor)
+EndEvent
+
+Event OnCombatStateChanged(Actor akTarget, int aeCombatState)
+    if aeCombatState > 0 && akTarget != None
+        RetaliateAgainst(akTarget)
+    endif
 EndEvent
 
 Event OnTimer(int aiTimerID)
     if aiTimerID != 1
         return
     endif
+
     if mode != None && mode.GetValue() > 0.0
         Actor playerRef = Game.GetPlayer()
-        Bool scenePlaying = false
-        if dialogueScene != None
-            scenePlaying = dialogueScene.IsPlaying()
+        if !IsPlayerTeammate()
+            SetPlayerTeammate(true, true, true)
         endif
-        if playerRef.IsInCombat() && !IsInCombat()
-            AssistAgainst(playerRef.GetCombatTarget())
+
+        if playerRef.IsInCombat()
+            AssistPlayerAgainst(playerRef.GetCombatTarget())
         endif
-        if mode.GetValue() == 1.0 && !IsInCombat() && !playerRef.IsInCombat() && !scenePlaying
-            if GetWorldSpace() != playerRef.GetWorldSpace() || (GetWorldSpace() == None && GetParentCell() != playerRef.GetParentCell()) || GetDistance(playerRef) > 4000.0
-                MoveTo(playerRef, 110.0, -110.0, 0.0)
+
+        if mode.GetValue() == 1.0 && !IsInCombat() && !playerRef.IsInCombat()
+            if GetWorldSpace() != playerRef.GetWorldSpace() || (GetWorldSpace() == None && GetParentCell() != playerRef.GetParentCell()) || GetDistance(playerRef) > 3000.0
+                MoveTo(playerRef, 90.0, -90.0, 0.0)
                 MoveToNearestNavmeshLocation()
-                EvaluatePackage()
+                EvaluatePackage(true)
             endif
         endif
     endif
-    StartTimer(3.0, 1)
+
+    StartTimer(1.0, 1)
 EndEvent
