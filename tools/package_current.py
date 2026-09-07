@@ -6,9 +6,9 @@ follower=root/'build/DoroFollower'
 costumes=root/'build/DoroCostumes'
 out=root/'build/Doro_FO4_test_0.2.5.zip'
 
-# Keep the final packaged plugin on the approved companion balance profile.
-# build_doro_plugin.py may regenerate the vanilla Yao Guai combat values first,
-# so patch and validate the generated ESP immediately before packaging.
+# Apply the approved companion balance/profile immediately before packaging.
+# Development packages default to a normal/full ESP for compatibility with the
+# existing 0.2.4 test saves. Set DORO_ESPFE=1 only for clean-save ESP-FE tests.
 subprocess.check_call([sys.executable,str(root/'tools/apply_doro_combat_balance.py')])
 
 # One plugin only: DoroFollower.esp contains follower, dialogue and all costume recipes.
@@ -58,4 +58,4 @@ with zipfile.ZipFile(out) as z:
     assert 'Meshes/Armor/DoroCostumes/DoroHelmet.nif' in names
     assert 'Meshes/Armor/DoroCostumes/DoroDogSuit.nif' in names
 
-print('PACKAGE_OK_SINGLE_ESP_FE',out,out.stat().st_size)
+print('PACKAGE_OK_SINGLE_ESP',out,out.stat().st_size)
