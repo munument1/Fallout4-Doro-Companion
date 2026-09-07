@@ -1,3 +1,8 @@
+"""Legacy 0.2 packager.
+
+Do not use for current builds. 0.2.5+ uses tools/package_current.py and a single
+ESL-flagged DoroFollower.esp containing follower, dialogue and costume records.
+"""
 from pathlib import Path
 import zipfile,hashlib,json
 r=Path(__file__).resolve().parent.parent;out=r/'build/DoroFollower'
