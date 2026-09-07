@@ -1,6 +1,6 @@
 # Fallout Doro Companion
 
-Fallout 4용 도로롱 독립 동료와 플레이어 머리 탈을 개발하는 작업 저장소입니다.
+Fallout 4용 도로롱 독립 동료, 플레이어 머리 탈, 도그밋 의상을 개발하는 작업 저장소입니다.
 
 현재 상태는 **0.2.5 런타임 수정 테스트 단계**입니다. 0.2.4에서 확인된 대화 무반응과 화학작업대 카테고리 누락 원인을 소스에서 수정했으며, 실제 게임 재검증은 아직 필요합니다. 완성된 배포판이 아닙니다.
 
@@ -8,8 +8,10 @@ Fallout 4용 도로롱 독립 동료와 플레이어 머리 탈을 개발하는 
 - 야오과이 뼈대와 애니메이션을 사용하고 도그밋 정도의 크기로 조정
 - 원래의 닫힌 입 모양 유지
 - 도그밋 및 다른 동료와 함께 다니는 독립 영입 방식 지향
-- 플레이어용 도로롱 머리 탈: 화학작업대 무료 제작 지향
-- 도그밋용 도로롱 의상 테스트 자산 포함 가능
+- 플레이어용 도로롱 머리 탈: 화학작업대 무료 제작
+- 도그밋용 도로롱 의상 테스트 자산
+- **플러그인은 `DoroFollower.esp` 하나만 사용**
+- `DoroFollower.esp`는 **ESL-flagged ESP(ESP-FE)** 로 생성
 
 ## 0.2.5 수정 핵심
 
@@ -17,7 +19,10 @@ Fallout 4용 도로롱 독립 동료와 플레이어 머리 탈을 개발하는 
 - 기본 Greeting이 대화 씬에 진입하지 못할 때 `DoroMainDialogueScene`을 직접 시작하는 fallback을 추가했습니다.
 - 대화 씬 참조가 없을 때 타이머가 `None.IsPlaying()`을 호출하지 않도록 방어했습니다.
 - 화학작업대의 `DORO` 카테고리는 바닐라 `RecipeUtility [KYWD:0006980C]`를 donor로 사용하여 `Recipe Filter` 타입을 유지하도록 변경했습니다.
-- `tools/package_current.py`는 `DoroFollower.esp`와 `DoroCostumes.esp`를 한 테스트 ZIP에 함께 넣어 의상 플러그인 누락을 방지합니다.
+- 머리 탈/도그밋 의상/제작 레시피 레코드를 `DoroFollower.esp` 안으로 통합했습니다.
+- 동료/대화 레코드와 Form ID가 충돌하지 않도록 의상 레코드는 로컬 `0x840~0x846` 구간을 사용합니다.
+- TES4 헤더에 ESL 플래그를 설정하고 모든 신규 Form ID를 라이트 플러그인 범위 안에 유지합니다.
+- `tools/package_current.py`는 `DoroFollower.esp` 하나만 포함하는 테스트 ZIP을 만듭니다.
 
 ## 저장 범위
 
@@ -27,13 +32,13 @@ Fallout 4용 도로롱 독립 동료와 플레이어 머리 탈을 개발하는 
 
 ## 주요 소스
 
-- `tools/build_doro_plugin.py`: 동료 플러그인 생성
+- `tools/build_doro_plugin.py`: **단일 ESP-FE 생성**. 동료 + 대화 + 머리 탈 + 도그밋 의상 + 제작 레시피를 모두 포함
 - `tools/doro_dialogue.py`: 대화 퀘스트·씬·토픽 생성
 - `tools/DoroCompanionScript.psc`: 영입 상태·추적·전투 지원
 - `tools/DoroDialogueQuestScript.psc`: 대화 단계별 명령 전달
-- `tools/build_costume_plugin.py`: 의상 제작 레코드 생성
+- `tools/build_costume_plugin.py`: 별도 ESP 생성기가 아니라 통합 `DoroFollower.esp` 내부 의상 레코드 검증 도구
 - `tools/build_costume_meshes.py`: 의상 모델 변환
-- `tools/package_current.py`: 동료 + 의상 통합 테스트 ZIP 생성
+- `tools/package_current.py`: 단일 ESP-FE 테스트 ZIP 생성
 
 개발 환경은 Windows, Blender 5.2.1, PyNifly 28.2, Fallout 4 및 Creation Kit의 Papyrus 컴파일러입니다. 일부 도구에 로컬 절대 경로가 있으며 다른 환경에서는 수정이 필요합니다. `build/gorilla_records.json` 등 로컬 추출 데이터와 `tools/deps/`의 외부 의존성도 별도로 필요합니다.
 
