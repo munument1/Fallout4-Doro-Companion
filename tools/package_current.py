@@ -1,10 +1,15 @@
 from pathlib import Path
-import hashlib,json,zipfile
+import hashlib,json,zipfile,subprocess,sys
 
 root=Path(__file__).resolve().parent.parent
 follower=root/'build/DoroFollower'
 costumes=root/'build/DoroCostumes'
 out=root/'build/Doro_FO4_test_0.2.5.zip'
+
+# Keep the final packaged plugin on the approved companion balance profile.
+# build_doro_plugin.py may regenerate the vanilla Yao Guai combat values first,
+# so patch and validate the generated ESP immediately before packaging.
+subprocess.check_call([sys.executable,str(root/'tools/apply_doro_combat_balance.py')])
 
 # One plugin only: DoroFollower.esp contains follower, dialogue and all costume recipes.
 files={
