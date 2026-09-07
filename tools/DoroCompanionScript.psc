@@ -59,17 +59,22 @@ Event OnActivate(ObjectReference akActionRef)
         voice.Play(Self)
     endif
     if dialogueQuest == None
-        Debug.Notification("Doro: dialogue quest missing from ESP (0.2.4).")
+        Debug.Notification("Doro: dialogue quest missing from ESP (0.2.5).")
         return
     endif
     if !dialogueQuest.IsRunning()
-        Debug.Notification("Doro: quest present but startup failed (0.2.4).")
+        Debug.Notification("Doro: quest present but startup failed (0.2.5).")
         return
     endif
     if !IsInDialogueWithPlayer() && dialogueScene != None && !dialogueScene.IsPlaying()
-        ; Run native activation so Greeting establishes the player dialogue target.
+        ; First let native activation select the Greeting and establish the dialogue target.
         ; Default-processing-only prevents a recursive OnActivate event.
         Activate(Game.GetPlayer(), true)
+        Utility.Wait(0.15)
+        ; If Greeting did not enter the player-dialogue scene, start the bound scene directly.
+        if !IsInDialogueWithPlayer() && !dialogueScene.IsPlaying()
+            dialogueScene.Start()
+        endif
     endif
 EndEvent
 
@@ -121,10 +126,14 @@ Event OnTimer(int aiTimerID)
     endif
     if mode != None && mode.GetValue() > 0.0
         Actor playerRef = Game.GetPlayer()
+        Bool scenePlaying = false
+        if dialogueScene != None
+            scenePlaying = dialogueScene.IsPlaying()
+        endif
         if playerRef.IsInCombat() && !IsInCombat()
             AssistAgainst(playerRef.GetCombatTarget())
         endif
-        if mode.GetValue() == 1.0 && !IsInCombat() && !playerRef.IsInCombat() && !dialogueScene.IsPlaying()
+        if mode.GetValue() == 1.0 && !IsInCombat() && !playerRef.IsInCombat() && !scenePlaying
             if GetWorldSpace() != playerRef.GetWorldSpace() || (GetWorldSpace() == None && GetParentCell() != playerRef.GetParentCell()) || GetDistance(playerRef) > 4000.0
                 MoveTo(playerRef, 110.0, -110.0, 0.0)
                 MoveToNearestNavmeshLocation()
