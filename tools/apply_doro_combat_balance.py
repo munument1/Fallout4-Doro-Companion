@@ -11,8 +11,9 @@ DORO_REF = 0x0100080B
 DORO_DIALOGUE_QUEST = 0x0100080C
 DORO_HELMET = 0x01000840
 DORO_HELMET_ARMA = 0x01000841
+DORO_PACKAGES = (0x01000806, 0x01000807, 0x01000808, 0x0100082A)
+DORO_MENU = 0x01000805
 UNARMED_YAOGUAI = 0x000C2C38
-UNARMED_DOGMEAT = 0x000C2C2B
 
 # Development builds default to a normal/full ESP. 0.2.4 was a full ESP, and
 # flipping the same plugin name to ESP-FE in an existing test save can invalidate
@@ -36,6 +37,8 @@ def iter_records(buf, start=0, end=None):
         fid = struct.unpack_from('<I', buf, i + 12)[0]
         yield sig.decode('ascii', 'replace'), fid, flags, i, i + 24, size
         i += 24 + size
+    if i != end:
+        raise AssertionError(f'ESP record walk ended at {i}, expected {end}')
 
 
 def subrecords(buf, body_start, body_size):
@@ -55,6 +58,8 @@ def subrecords(buf, body_start, body_size):
             ext_size = None
         yield sig, data_start, size
         i = data_start + size
+    if i != end:
+        raise AssertionError(f'Subrecord walk ended at {i}, expected {end}')
 
 
 def find_record(records, sig, fid):
@@ -65,6 +70,10 @@ def find_sub(buf, record, sig):
     return next(s for s in subrecords(buf, record[4], record[5]) if s[0] == sig)
 
 
+def all_subs(buf, record, sig):
+    return [s for s in subrecords(buf, record[4], record[5]) if s[0] == sig]
+
+
 def main():
     if not ESP.exists():
         raise FileNotFoundError(ESP)
@@ -72,13 +81,29 @@ def main():
     data = bytearray(ESP.read_bytes())
     records = list(iter_records(data))
 
-    # Dogmeat-level base unarmed damage while retaining Doro's Yao Guai rig and animations.
+    # Doro keeps Yao Guai combat animation compatibility. Damage is reduced by
+    # scaling the race ATKD multipliers, not by substituting Dogmeat's weapon.
     race = find_record(records, 'RACE', DORO_RACE)
     unwp = find_sub(data, race, 'UNWP')
-    old_weapon = struct.unpack_from('<I', data, unwp[1])[0]
-    if old_weapon not in (UNARMED_YAOGUAI, UNARMED_DOGMEAT):
-        raise AssertionError(f'Unexpected Doro UNWP: {old_weapon:08X}')
-    struct.pack_into('<I', data, unwp[1], UNARMED_DOGMEAT)
+    struct.pack_into('<I', data, unwp[1], UNARMED_YAOGUAI)
+
+    race_data = find_sub(data, race, 'DATA')
+    race_flags = struct.unpack_from('<I', data, race_data[1] + 32)[0]
+    race_flags &= ~(1 << 20)  # Can't Open Doors
+    race_flags |= 1 << 21     # Allow PC Dialogue
+    struct.pack_into('<I', data, race_data[1] + 32, race_flags)
+    struct.pack_into('<I', data, race_data[1] + 44, 1)  # Medium pathing size
+
+    attacks = all_subs(data, race, 'ATKD')
+    if not attacks:
+        raise AssertionError('DoroRace has no ATKD attack data')
+    multipliers = [struct.unpack_from('<f', data, s[1])[0] for s in attacks]
+    # Generated Yao Guai records contain 1.0/0.1-style donor values. Scale once.
+    # A second packaging pass must not scale the already-balanced 0.25/0.025 values again.
+    if any(value > 0.250001 for value in multipliers):
+        for s in attacks:
+            value = struct.unpack_from('<f', data, s[1])[0]
+            struct.pack_into('<f', data, s[1], value * 0.25)
 
     # Companion balance: player-level scaling, moderate durability, essential preserved.
     npc = find_record(records, 'NPC_', DORO_NPC)
@@ -93,22 +118,44 @@ def main():
     struct.pack_into('<H', data, dnam[1], 275)       # health
     struct.pack_into('<H', data, dnam[1] + 2, 100)  # AP
 
-    # Mascot head occupies only FO4 biped slot 30 (helmet/head) instead of 30+31+32.
+    aidt = find_sub(data, npc, 'AIDT')
+    data[aidt[1]] = 2      # Very Aggressive
+    data[aidt[1] + 5] = 2  # Helps Friends and Allies
+
+    # Ensure follower/home/dialogue packages never suppress combat.
+    for fid in DORO_PACKAGES:
+        package = find_record(records, 'PACK', fid)
+        pkdt = find_sub(data, package, 'PKDT')
+        package_flags = struct.unpack_from('<I', data, pkdt[1])[0] & ~(1 << 20)
+        struct.pack_into('<I', data, pkdt[1], package_flags)
+
+    # Mascot head occupies only FO4 biped slot 30 (helmet/head).
     for fid in (DORO_HELMET, DORO_HELMET_ARMA):
         rec = find_record(records, 'ARMO' if fid == DORO_HELMET else 'ARMA', fid)
         bod2 = find_sub(data, rec, 'BOD2')
         struct.pack_into('<I', data, bod2[1], 1)
 
-    # Keep the dialogue fix intact.
+    # Shrink the placed actor controller enough for ordinary interior navigation.
+    placed = find_record(records, 'ACHR', DORO_REF)
+    name = find_sub(data, placed, 'NAME')
+    assert struct.unpack_from('<I', data, name[1])[0] == DORO_NPC
+    xscl = find_sub(data, placed, 'XSCL')
+    struct.pack_into('<f', data, xscl[1], 0.42)
+
+    # Keep the legacy dialogue data structurally valid even though current runtime
+    # activation uses the script-driven command menu instead of native Greeting.
     quest = find_record(records, 'QUST', DORO_DIALOGUE_QUEST)
     qdnam = find_sub(data, quest, 'DNAM')
     quest_flags = struct.unpack_from('<H', data, qdnam[1])[0]
     assert quest_flags & 0x8000, 'Dialogue quest lost HasDialogueData'
 
-    # Keep the original 0.2.4 placed reference intact.
-    placed = find_record(records, 'ACHR', DORO_REF)
-    name = find_sub(data, placed, 'NAME')
-    assert struct.unpack_from('<I', data, name[1])[0] == DORO_NPC
+    menu = find_record(records, 'MESG', DORO_MENU)
+    menu_dnam = find_sub(data, menu, 'DNAM')
+    assert struct.unpack_from('<I', data, menu_dnam[1])[0] & 1, 'DoroCommandMenu is not a Message Box'
+    assert len(all_subs(data, menu, 'ITXT')) == 5, 'DoroCommandMenu must contain five buttons'
+
+    vmad = find_sub(data, npc, 'VMAD')
+    assert b'DoroCompanionScript' in data[vmad[1]:vmad[1] + vmad[2]], 'NPC lost DoroCompanionScript VMAD'
 
     # Full ESP for existing-save development by default; ESP-FE only on clean-save tests.
     tes4 = find_record(records, 'TES4', 0)
@@ -121,13 +168,27 @@ def main():
 
     ESP.write_bytes(data)
 
-    # Verify written values.
+    # Full post-write validation.
     check = bytearray(ESP.read_bytes())
     records = list(iter_records(check))
+    form_ids = [r[1] for r in records]
+    assert len(form_ids) == len(set(form_ids)), 'Duplicate FormID detected'
+
+    tes4 = find_record(records, 'TES4', 0)
+    hedr = find_sub(check, tes4, 'HEDR')
+    _version, declared_count, _next_id = struct.unpack_from('<fII', check, hedr[1])
+    assert declared_count == len(records) - 1, (declared_count, len(records) - 1)
 
     race = find_record(records, 'RACE', DORO_RACE)
     unwp = find_sub(check, race, 'UNWP')
-    assert struct.unpack_from('<I', check, unwp[1])[0] == UNARMED_DOGMEAT
+    assert struct.unpack_from('<I', check, unwp[1])[0] == UNARMED_YAOGUAI
+    race_data = find_sub(check, race, 'DATA')
+    race_flags = struct.unpack_from('<I', check, race_data[1] + 32)[0]
+    assert not (race_flags & (1 << 20))
+    assert race_flags & (1 << 21)
+    assert struct.unpack_from('<I', check, race_data[1] + 44)[0] == 1
+    attack_mults = [struct.unpack_from('<f', check, s[1])[0] for s in all_subs(check, race, 'ATKD')]
+    assert attack_mults and max(attack_mults) <= 0.250001
 
     npc = find_record(records, 'NPC_', DORO_NPC)
     acbs = find_sub(check, npc, 'ACBS')
@@ -137,23 +198,34 @@ def main():
     max_level = struct.unpack_from('<H', check, acbs[1] + 10)[0]
     assert flags & 0x80
     assert (level_mult, min_level, max_level) == (1000, 1, 100)
-
     dnam = find_sub(check, npc, 'DNAM')
     assert struct.unpack_from('<HH', check, dnam[1]) == (275, 100)
+    aidt = find_sub(check, npc, 'AIDT')
+    assert check[aidt[1]] == 2 and check[aidt[1] + 5] == 2
+
+    for fid in DORO_PACKAGES:
+        package = find_record(records, 'PACK', fid)
+        pkdt = find_sub(check, package, 'PKDT')
+        assert not (struct.unpack_from('<I', check, pkdt[1])[0] & (1 << 20))
 
     for fid in (DORO_HELMET, DORO_HELMET_ARMA):
         rec = find_record(records, 'ARMO' if fid == DORO_HELMET else 'ARMA', fid)
         bod2 = find_sub(check, rec, 'BOD2')
         assert struct.unpack_from('<I', check, bod2[1])[0] == 1
 
-    tes4 = find_record(records, 'TES4', 0)
+    placed = find_record(records, 'ACHR', DORO_REF)
+    xscl = find_sub(check, placed, 'XSCL')
+    assert abs(struct.unpack_from('<f', check, xscl[1])[0] - 0.42) < 1e-6
+
     header_flags = struct.unpack_from('<I', check, tes4[3] + 8)[0]
     assert bool(header_flags & 0x200) == USE_ESPFE
 
     print('DORO_RUNTIME_PATCH_OK')
-    print('UNWP=UnarmedDogmeat[000C2C2B] base damage 25')
+    print('UNWP=UnarmedYaoGuai[000C2C38] ATKD_MAX<=0.25')
+    print('RACE_SIZE=MEDIUM CANT_OPEN_DOORS=OFF ALLOW_PC_DIALOGUE=ON')
+    print('AI=VERY_AGGRESSIVE ASSIST=FRIENDS_AND_ALLIES PACK_IGNORE_COMBAT=OFF')
     print('PC_LEVEL_MULT=1.0 MIN=1 MAX=100 HEALTH=275 AP=100 ESSENTIAL=kept')
-    print('HELMET_SLOT=30_ONLY BOD2=1')
+    print('PLACED_SCALE=0.42 HELMET_SLOT=30_ONLY')
     print('PLUGIN_TYPE=' + ('ESP-FE' if USE_ESPFE else 'FULL_ESP'))
 
 
