@@ -4,6 +4,8 @@ GlobalVariable mode
 Message commands
 Sound voice
 Bool menuOpen = false
+Bool releaseCombatRestored = false
+Bool combatRequestPending = false
 Faction playerFaction
 Faction workshopNPCFaction
 Faction playerAllyFaction
@@ -14,6 +16,7 @@ Function ClearVanillaCommandMode()
     SetCanDoCommand(true)
     SetCommandState(false)
     SetCanDoCommand(false)
+    SetDoingFavor(false)
 EndFunction
 
 Bool Function IsRecruited()
@@ -40,20 +43,36 @@ Function Setup()
     SetRelationshipRank(Game.GetPlayer(), 4)
     EnableAI(true)
     IgnoreFriendlyHits(true)
-    ; Keep reference scale neutral. test14 moves Doro size into DoroRace height.
-    SetScale(1.0)
+    ; RC1 could store a zero damage override in a saved actor.
+    if !releaseCombatRestored
+        ActorValue unarmedDamage = Game.GetForm(0x000002DF) as ActorValue
+        if unarmedDamage != None && GetBaseValue(unarmedDamage) == 0.0
+            SetValue(unarmedDamage, 100.0)
+        endif
+        releaseCombatRestored = true
+    endif
+    ; This mod now uses a message menu. Retire only its own obsolete dialogue scene.
+    Scene legacyScene = Game.GetFormFromFile(0x0000080D, "DoroFollower.esp") as Scene
+    if legacyScene != None && legacyScene.IsPlaying()
+        legacyScene.Stop()
+    endif
+    ; Match the dedicated Doro skeleton at Race height 1 and reference scale 0.42.
+    if Math.Abs(GetScale() - 0.42) > 0.001
+        SetScale(0.42)
+    endif
     ClearVanillaCommandMode()
     if IsRecruited()
-        SetPlayerTeammate(true, true, true)
-        if mode.GetValue() == 1.0
+        SetPlayerTeammate(true, false, true)
+        if !IsInCombat() && mode.GetValue() == 1.0
             FollowerFollow()
             EvaluatePackage(false)
-        elseif mode.GetValue() == 2.0
+        elseif !IsInCombat() && mode.GetValue() == 2.0
             FollowerWait()
             EvaluatePackage(false)
         endif
     endif
     menuOpen = false
+    combatRequestPending = false
     RegisterCombatEvents()
     RegisterForRemoteEvent(Game.GetPlayer(), "OnPlayerLoadGame")
     CancelTimer(1)
@@ -71,7 +90,10 @@ Event Actor.OnPlayerLoadGame(Actor akSender)
 EndEvent
 
 Event OnActivate(ObjectReference akActionRef)
-    if akActionRef != Game.GetPlayer() || IsInCombat() || menuOpen
+    if akActionRef != Game.GetPlayer() || menuOpen
+        return
+    endif
+    if IsInCombat()
         return
     endif
     if commands == None || mode == None
@@ -82,7 +104,7 @@ Event OnActivate(ObjectReference akActionRef)
         voice.Play(Self)
     endif
     if commands == None
-        Debug.Notification("Doro: command menu missing from DoroFollower.esp")
+        Debug.Notification("Doro: please check that DoroFollower.esp is enabled.")
         return
     endif
     menuOpen = true
@@ -96,8 +118,6 @@ Event OnActivate(ObjectReference akActionRef)
         DoCommand(30)
     elseif choice == 3
         DoCommand(40)
-    elseif choice == 4
-        DoCommand(50)
     endif
 EndEvent
 
@@ -110,21 +130,21 @@ Function DoCommand(int choice)
     endif
     if choice == 10
         mode.SetValue(1.0)
-        SetPlayerTeammate(true, true, true)
+        SetPlayerTeammate(true, false, true)
         IgnoreFriendlyHits(true)
         ClearVanillaCommandMode()
         FollowerFollow()
         EvaluatePackage(false)
     elseif choice == 20
         mode.SetValue(2.0)
-        SetPlayerTeammate(true, true, true)
+        SetPlayerTeammate(true, false, true)
         IgnoreFriendlyHits(true)
         ClearVanillaCommandMode()
         FollowerWait()
         EvaluatePackage(false)
     elseif choice == 30
         if !IsPlayerTeammate()
-            SetPlayerTeammate(true, true, true)
+            SetPlayerTeammate(true, false, true)
         endif
         IgnoreFriendlyHits(true)
         ClearVanillaCommandMode()
@@ -136,20 +156,6 @@ Function DoCommand(int choice)
         SetDoingFavor(false)
         StopCombat()
         MoveToMyEditorLocation()
-    elseif choice == 50
-        Idle testIdle = Game.GetForm(0x00027075) as Idle
-        if testIdle == None
-            Debug.Notification("Doro Yao Guai idle test: form missing")
-            return
-        endif
-        AttemptAnimationSetSwitch()
-        Utility.Wait(0.1)
-        bool played = PlayIdle(testIdle)
-        if played
-            Debug.Notification("Doro Yao Guai idle test: PLAYED")
-        else
-            Debug.Notification("Doro Yao Guai idle test: FAILED")
-        endif
     endif
 EndFunction
 
@@ -185,8 +191,14 @@ Function RetaliateAgainst(Actor target)
     if IsFriendlyTarget(target)
         return
     endif
-    EnableAI(true)
-    StartCombat(target, true)
+    ; Native combat owns retargeting once engaged. Repeated hits must not restart it.
+    if IsInCombat() || combatRequestPending
+        return
+    endif
+    combatRequestPending = true
+    StartCombat(target, false)
+    ; Cover the short interval before the engine reports the new combat state.
+    StartTimer(1.0, 2)
 EndFunction
 
 Function AssistPlayerAgainst(Actor target)
@@ -228,19 +240,26 @@ Event OnHit(ObjectReference akTarget, ObjectReference akAggressor, Form akSource
 EndEvent
 
 Event OnCombatStateChanged(Actor akTarget, int aeCombatState)
-    if aeCombatState > 0 && IsFriendlyTarget(akTarget)
-        StopCombat()
+    ; Searching or a missing/dead target is not proof that we attacked a friend.
+    if aeCombatState == 1 && akTarget != None && !akTarget.IsDead()
+        if IsFriendlyTarget(akTarget) && GetCombatTarget() == akTarget
+            StopCombat()
+        endif
     endif
 EndEvent
 
 Event OnTimer(int aiTimerID)
+    if aiTimerID == 2
+        combatRequestPending = false
+        return
+    endif
     if aiTimerID != 1
         return
     endif
     if IsRecruited()
         Actor playerRef = Game.GetPlayer()
         if !IsPlayerTeammate()
-            SetPlayerTeammate(true, true, true)
+            SetPlayerTeammate(true, false, true)
         endif
         if IsInCombat()
             RegisterCombatEvents()
