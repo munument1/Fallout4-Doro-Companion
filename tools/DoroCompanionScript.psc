@@ -34,20 +34,15 @@ Function Setup()
     playerAllyFaction = Game.GetForm(0x00106C30) as Faction
     playerFriendFaction = Game.GetForm(0x00106C31) as Faction
     minutemenFaction = Game.GetForm(0x00068043) as Faction
-
     BlockActivation(true, false)
     AllowPCDialogue(false)
     SetEssential(true)
     SetRelationshipRank(Game.GetPlayer(), 4)
     EnableAI(true)
     IgnoreFriendlyHits(true)
-
-    ; test13 moves Doro's 0.42 size from the placed reference into the NPC base
-    ; height fields. Force REF scale to 1.0 so old saves do not keep the former
-    ; 0.42 reference scale and double-shrink the actor.
+    ; Keep reference scale neutral. test14 moves Doro size into DoroRace height.
     SetScale(1.0)
     ClearVanillaCommandMode()
-
     if IsRecruited()
         SetPlayerTeammate(true, true, true)
         if mode.GetValue() == 1.0
@@ -58,7 +53,6 @@ Function Setup()
             EvaluatePackage(false)
         endif
     endif
-
     menuOpen = false
     RegisterCombatEvents()
     RegisterForRemoteEvent(Game.GetPlayer(), "OnPlayerLoadGame")
@@ -69,11 +63,9 @@ EndFunction
 Event OnInit()
     Setup()
 EndEvent
-
 Event OnLoad()
     Setup()
 EndEvent
-
 Event Actor.OnPlayerLoadGame(Actor akSender)
     Setup()
 EndEvent
@@ -82,26 +74,20 @@ Event OnActivate(ObjectReference akActionRef)
     if akActionRef != Game.GetPlayer() || IsInCombat() || menuOpen
         return
     endif
-
     if commands == None || mode == None
         Setup()
     endif
-
     ClearVanillaCommandMode()
-
     if voice != None
         voice.Play(Self)
     endif
-
     if commands == None
         Debug.Notification("Doro: command menu missing from DoroFollower.esp")
         return
     endif
-
     menuOpen = true
     int choice = commands.Show()
     menuOpen = false
-
     if choice == 0
         DoCommand(10)
     elseif choice == 1
@@ -122,7 +108,6 @@ Function DoCommand(int choice)
     if mode == None
         return
     endif
-
     if choice == 10
         mode.SetValue(1.0)
         SetPlayerTeammate(true, true, true)
@@ -152,10 +137,19 @@ Function DoCommand(int choice)
         StopCombat()
         MoveToMyEditorLocation()
     elseif choice == 50
-        ; Diagnostic only: bypass AI selection and ask the Yao Guai behavior
-        ; subgraph to execute one of DoroRace's real ATKE events directly.
-        Debug.Notification("Doro attack graph test: meleeStart_1")
-        PlaySubGraphAnimation("meleeStart_1")
+        Idle testIdle = Game.GetForm(0x00027075) as Idle
+        if testIdle == None
+            Debug.Notification("Doro Yao Guai idle test: form missing")
+            return
+        endif
+        AttemptAnimationSetSwitch()
+        Utility.Wait(0.1)
+        bool played = PlayIdle(testIdle)
+        if played
+            Debug.Notification("Doro Yao Guai idle test: PLAYED")
+        else
+            Debug.Notification("Doro Yao Guai idle test: FAILED")
+        endif
     endif
 EndFunction
 
@@ -208,7 +202,6 @@ Function FindAndAttackNearbyHostile()
     if !IsRecruited() || IsInCombat()
         return
     endif
-
     Actor playerRef = Game.GetPlayer()
     Actor candidate = None
     int tries = 0
@@ -244,28 +237,23 @@ Event OnTimer(int aiTimerID)
     if aiTimerID != 1
         return
     endif
-
     if IsRecruited()
         Actor playerRef = Game.GetPlayer()
         if !IsPlayerTeammate()
             SetPlayerTeammate(true, true, true)
         endif
-
         if IsInCombat()
             RegisterCombatEvents()
             StartTimer(1.0, 1)
             return
         endif
-
         Actor playerTarget = playerRef.GetCombatTarget()
         if playerTarget != None
             AssistPlayerAgainst(playerTarget)
         endif
-
         if !IsInCombat()
             FindAndAttackNearbyHostile()
         endif
-
         if !IsInCombat() && mode.GetValue() == 1.0
             if GetWorldSpace() != playerRef.GetWorldSpace() || (GetWorldSpace() == None && GetParentCell() != playerRef.GetParentCell()) || GetDistance(playerRef) > 2500.0
                 MoveTo(playerRef, 90.0, -90.0, 0.0)
@@ -274,7 +262,6 @@ Event OnTimer(int aiTimerID)
             endif
         endif
     endif
-
     RegisterCombatEvents()
     StartTimer(1.0, 1)
 EndEvent
