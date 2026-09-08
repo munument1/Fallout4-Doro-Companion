@@ -11,8 +11,6 @@ Faction playerFriendFaction
 Faction minutemenFaction
 
 Function ClearVanillaCommandMode()
-    ; Native companion command mode can intercept activation before our menu.
-    ; Only clear it during setup/explicit commands, never from the combat timer.
     SetCanDoCommand(true)
     SetCommandState(false)
     SetCanDoCommand(false)
@@ -37,19 +35,22 @@ Function Setup()
     playerFriendFaction = Game.GetForm(0x00106C31) as Faction
     minutemenFaction = Game.GetForm(0x00068043) as Faction
 
-    ; Script-only activation path. Keep the prompt, block broken native dialogue.
     BlockActivation(true, false)
     AllowPCDialogue(false)
     SetEssential(true)
     SetRelationshipRank(Game.GetPlayer(), 4)
     EnableAI(true)
     IgnoreFriendlyHits(true)
+
+    ; test13 moves Doro's 0.42 size from the placed reference into the NPC base
+    ; height fields. Force REF scale to 1.0 so old saves do not keep the former
+    ; 0.42 reference scale and double-shrink the actor.
+    SetScale(1.0)
     ClearVanillaCommandMode()
 
     if IsRecruited()
         SetPlayerTeammate(true, true, true)
         if mode.GetValue() == 1.0
-            ; Establish follow state once. Do not keep resetting it every second.
             FollowerFollow()
             EvaluatePackage(false)
         elseif mode.GetValue() == 2.0
@@ -109,6 +110,8 @@ Event OnActivate(ObjectReference akActionRef)
         DoCommand(30)
     elseif choice == 3
         DoCommand(40)
+    elseif choice == 4
+        DoCommand(50)
     endif
 EndEvent
 
@@ -148,6 +151,11 @@ Function DoCommand(int choice)
         SetDoingFavor(false)
         StopCombat()
         MoveToMyEditorLocation()
+    elseif choice == 50
+        ; Diagnostic only: bypass AI selection and ask the Yao Guai behavior
+        ; subgraph to execute one of DoroRace's real ATKE events directly.
+        Debug.Notification("Doro attack graph test: meleeStart_1")
+        PlaySubGraphAnimation("meleeStart_1")
     endif
 EndFunction
 
@@ -183,8 +191,6 @@ Function RetaliateAgainst(Actor target)
     if IsFriendlyTarget(target)
         return
     endif
-
-    ; Once combat starts, do NOT EvaluatePackage or call follower state functions.
     EnableAI(true)
     StartCombat(target, true)
 EndFunction
@@ -229,8 +235,6 @@ Event OnHit(ObjectReference akTarget, ObjectReference akAggressor, Form akSource
 EndEvent
 
 Event OnCombatStateChanged(Actor akTarget, int aeCombatState)
-    ; Settlement safety guard. Do not feed enemy combat transitions back into
-    ; StartCombat; only cancel combat if the selected target is player-friendly.
     if aeCombatState > 0 && IsFriendlyTarget(akTarget)
         StopCombat()
     endif
@@ -247,7 +251,6 @@ Event OnTimer(int aiTimerID)
             SetPlayerTeammate(true, true, true)
         endif
 
-        ; Never touch follower/package state while Doro is in combat.
         if IsInCombat()
             RegisterCombatEvents()
             StartTimer(1.0, 1)
@@ -263,7 +266,6 @@ Event OnTimer(int aiTimerID)
             FindAndAttackNearbyHostile()
         endif
 
-        ; Only teleport/re-evaluate when genuinely out of combat and very far away.
         if !IsInCombat() && mode.GetValue() == 1.0
             if GetWorldSpace() != playerRef.GetWorldSpace() || (GetWorldSpace() == None && GetParentCell() != playerRef.GetParentCell()) || GetDistance(playerRef) > 2500.0
                 MoveTo(playerRef, 90.0, -90.0, 0.0)
