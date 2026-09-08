@@ -82,7 +82,11 @@ add('NPC_',AUDIO,audio)
 
 script=S('DoroCompanionScript')[:-1]
 vmad=struct.pack('<HHHH',6,2,1,len(script))+script+b'\0'+struct.pack('<H',0)
-npc=clone(0xa0f33,{'EDID':S('DoroCompanion'),'RNAM':U(RACE),'WNAM':U(ARMOR),'FULL':S('Doro'),'CSCR':U(AUDIO),'VTCK':U(own(0x82b)),'DNAM':struct.pack('<HHHBB',350,150,0,1,0)},['SNAM','INAM','DPLT','ECOR','PRKZ','PRKR'])
+npc=clone(0xa0f33,{
+ 'EDID':S('DoroCompanion'),'RNAM':U(RACE),'ATKR':U(RACE),'WNAM':U(ARMOR),
+ 'FULL':S('Doro'),'CSCR':U(AUDIO),'VTCK':U(own(0x82b)),
+ 'DNAM':struct.pack('<HHHBB',350,150,0,1,0)
+},['SNAM','INAM','DPLT','ECOR','PRKZ','PRKR'])
 npc.insert(1,('VMAD',vmad))
 for i,(s,b) in enumerate(npc):
  if s=='ACBS':
@@ -189,6 +193,10 @@ assert sum(t=='COBJ' for t,f,fl,b in parsed)==2
 recipe_filter_tnam=dict(van[0x6980c][2]).get('TNAM')
 assert recipe_filter_tnam is not None
 for t,f,fl,b in parsed:
+ if t=='NPC_' and f==NPC:
+  ss=dict(subs(b))
+  assert ss['RNAM']==U(RACE)
+  assert ss['ATKR']==U(RACE)
  if t=='KYWD' and f==RECIPE_CATEGORY:
   assert dict(subs(b)).get('TNAM')==recipe_filter_tnam
  if t=='COBJ':
@@ -197,4 +205,4 @@ for t,f,fl,b in parsed:
   assert ss['FNAM']==U(RECIPE_CATEGORY)
 
 print('PLUGIN_WRITTEN',len(plugin),'bytes','scale',scale)
-print('PLUGIN_STRUCTURAL_CHECK_PASSED',len(parsed),'records','ESP-FE')
+print('PLUGIN_STRUCTURAL_CHECK_PASSED',len(parsed),'records','ESP-FE','ATKR=DoroRace')
