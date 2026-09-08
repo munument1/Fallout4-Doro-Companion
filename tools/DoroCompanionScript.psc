@@ -7,7 +7,8 @@ Bool menuOpen = false
 Faction playerFaction
 
 Function ClearVanillaCommandMode()
-    ; Native companion command mode was intercepting activation before our menu.
+    ; Native companion command mode can intercept activation before our menu.
+    ; Only clear it during setup/explicit commands, never from the combat timer.
     SetCanDoCommand(true)
     SetCommandState(false)
     SetCanDoCommand(false)
@@ -39,8 +40,12 @@ Function Setup()
     if IsRecruited()
         SetPlayerTeammate(true, true, true)
         if mode.GetValue() == 1.0
-            EvaluatePackage(true)
+            ; Establish follow state once. Do not keep resetting it every second.
             FollowerFollow()
+            EvaluatePackage(false)
+        elseif mode.GetValue() == 2.0
+            FollowerWait()
+            EvaluatePackage(false)
         endif
     endif
 
@@ -48,7 +53,6 @@ Function Setup()
     RegisterCombatEvents()
     RegisterForRemoteEvent(Game.GetPlayer(), "OnPlayerLoadGame")
     CancelTimer(1)
-    EvaluatePackage(true)
     StartTimer(1.0, 1)
 EndFunction
 
@@ -111,18 +115,14 @@ Function DoCommand(int choice)
         mode.SetValue(1.0)
         SetPlayerTeammate(true, true, true)
         ClearVanillaCommandMode()
-        EvaluatePackage(true)
-        Utility.Wait(0.1)
         FollowerFollow()
-        EvaluatePackage(true)
+        EvaluatePackage(false)
     elseif choice == 20
         mode.SetValue(2.0)
         SetPlayerTeammate(true, true, true)
         ClearVanillaCommandMode()
-        EvaluatePackage(true)
-        Utility.Wait(0.1)
         FollowerWait()
-        EvaluatePackage(true)
+        EvaluatePackage(false)
     elseif choice == 30
         if !IsPlayerTeammate()
             SetPlayerTeammate(true, true, true)
@@ -159,9 +159,12 @@ Function RetaliateAgainst(Actor target)
     if IsFriendlyTarget(target)
         return
     endif
+
+    ; Critical: once combat starts, do NOT EvaluatePackage or call follower
+    ; state functions here. Those can reset the AI package stack and immediately
+    ; cancel the combat state, producing rapid combat/health-bar flicker.
     EnableAI(true)
     StartCombat(target, true)
-    EvaluatePackage(true)
 EndFunction
 
 Function AssistPlayerAgainst(Actor target)
@@ -203,11 +206,9 @@ Event OnHit(ObjectReference akTarget, ObjectReference akAggressor, Form akSource
     endif
 EndEvent
 
-Event OnCombatStateChanged(Actor akTarget, int aeCombatState)
-    if aeCombatState > 0 && akTarget != None
-        RetaliateAgainst(akTarget)
-    endif
-EndEvent
+; Do not force StartCombat again from OnCombatStateChanged. That event fires while
+; combat state is transitioning and feeding it back into StartCombat can oscillate
+; the actor between combat/package states.
 
 Event OnTimer(int aiTimerID)
     if aiTimerID != 1
@@ -219,25 +220,30 @@ Event OnTimer(int aiTimerID)
         if !IsPlayerTeammate()
             SetPlayerTeammate(true, true, true)
         endif
-        ClearVanillaCommandMode()
+
+        ; Never touch follower/package state while Doro is in combat.
+        if IsInCombat()
+            RegisterCombatEvents()
+            StartTimer(1.0, 1)
+            return
+        endif
 
         Actor playerTarget = playerRef.GetCombatTarget()
         if playerTarget != None
             AssistPlayerAgainst(playerTarget)
         endif
 
-        FindAndAttackNearbyHostile()
+        if !IsInCombat()
+            FindAndAttackNearbyHostile()
+        endif
 
-        if mode.GetValue() == 1.0 && !IsInCombat()
-            ; Keep vanilla follower actor-value state synchronized with our package.
-            FollowerFollow()
+        ; Only teleport/re-evaluate when genuinely out of combat and very far away.
+        if !IsInCombat() && mode.GetValue() == 1.0
             if GetWorldSpace() != playerRef.GetWorldSpace() || (GetWorldSpace() == None && GetParentCell() != playerRef.GetParentCell()) || GetDistance(playerRef) > 2500.0
                 MoveTo(playerRef, 90.0, -90.0, 0.0)
                 MoveToNearestNavmeshLocation()
-                EvaluatePackage(true)
+                EvaluatePackage(false)
             endif
-        elseif mode.GetValue() == 2.0 && !IsInCombat()
-            FollowerWait()
         endif
     endif
 
