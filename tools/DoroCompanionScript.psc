@@ -6,26 +6,46 @@ Sound voice
 Bool menuOpen = false
 Faction playerFaction
 
+Function ClearVanillaCommandMode()
+    ; Native companion command mode was intercepting activation before our menu.
+    SetCanDoCommand(true)
+    SetCommandState(false)
+    SetCanDoCommand(false)
+EndFunction
+
+Bool Function IsRecruited()
+    return mode != None && mode.GetValue() > 0.0
+EndFunction
+
+Function RegisterCombatEvents()
+    RegisterForHitEvent(Self)
+    RegisterForHitEvent(Game.GetPlayer())
+EndFunction
+
 Function Setup()
     mode = Game.GetFormFromFile(0x00000804, "DoroFollower.esp") as GlobalVariable
     commands = Game.GetFormFromFile(0x00000805, "DoroFollower.esp") as Message
     voice = Game.GetFormFromFile(0x00000809, "DoroFollower.esp") as Sound
     playerFaction = Game.GetForm(0x0001C21C) as Faction
 
-    ; Doro uses the script-driven command menu. Block the broken native
-    ; Greeting/Scene activation path, but keep the activation prompt visible.
+    ; Script-only activation path. Keep the prompt, block broken native dialogue.
     BlockActivation(true, false)
-    AllowPCDialogue(true)
+    AllowPCDialogue(false)
     SetEssential(true)
     SetRelationshipRank(Game.GetPlayer(), 4)
-    SetCanDoCommand(true)
+    EnableAI(true)
+    ClearVanillaCommandMode()
 
-    if mode != None && mode.GetValue() > 0.0
+    if IsRecruited()
         SetPlayerTeammate(true, true, true)
+        if mode.GetValue() == 1.0
+            EvaluatePackage(true)
+            FollowerFollow()
+        endif
     endif
 
     menuOpen = false
-    RegisterForHitEvent(Self)
+    RegisterCombatEvents()
     RegisterForRemoteEvent(Game.GetPlayer(), "OnPlayerLoadGame")
     CancelTimer(1)
     EvaluatePackage(true)
@@ -52,6 +72,8 @@ Event OnActivate(ObjectReference akActionRef)
     if commands == None || mode == None
         Setup()
     endif
+
+    ClearVanillaCommandMode()
 
     if voice != None
         voice.Play(Self)
@@ -88,22 +110,33 @@ Function DoCommand(int choice)
     if choice == 10
         mode.SetValue(1.0)
         SetPlayerTeammate(true, true, true)
-        SetCanDoCommand(true)
+        ClearVanillaCommandMode()
+        EvaluatePackage(true)
+        Utility.Wait(0.1)
+        FollowerFollow()
+        EvaluatePackage(true)
     elseif choice == 20
         mode.SetValue(2.0)
         SetPlayerTeammate(true, true, true)
-        SetCanDoCommand(true)
+        ClearVanillaCommandMode()
+        EvaluatePackage(true)
+        Utility.Wait(0.1)
+        FollowerWait()
+        EvaluatePackage(true)
     elseif choice == 30
+        if !IsPlayerTeammate()
+            SetPlayerTeammate(true, true, true)
+        endif
+        ClearVanillaCommandMode()
         OpenInventory(true)
     elseif choice == 40
         mode.SetValue(0.0)
+        ClearVanillaCommandMode()
         SetPlayerTeammate(false)
         SetDoingFavor(false)
         StopCombat()
         MoveToMyEditorLocation()
     endif
-
-    EvaluatePackage(true)
 EndFunction
 
 Bool Function IsFriendlyTarget(Actor target)
@@ -126,8 +159,7 @@ Function RetaliateAgainst(Actor target)
     if IsFriendlyTarget(target)
         return
     endif
-    ; Do not clear the combat alarm here. StartCombat is the authoritative
-    ; transition and is forced so a hit always produces retaliation.
+    EnableAI(true)
     StartCombat(target, true)
     EvaluatePackage(true)
 EndFunction
@@ -136,15 +168,39 @@ Function AssistPlayerAgainst(Actor target)
     if IsFriendlyTarget(target)
         return
     endif
-    if target.IsHostileToActor(Game.GetPlayer())
-        StartCombat(target, true)
-        EvaluatePackage(true)
+    if target.IsHostileToActor(Game.GetPlayer()) || target.IsHostileToActor(Self)
+        RetaliateAgainst(target)
     endif
 EndFunction
 
+Function FindAndAttackNearbyHostile()
+    if !IsRecruited() || IsInCombat()
+        return
+    endif
+
+    Actor playerRef = Game.GetPlayer()
+    Actor candidate = None
+    int tries = 0
+    while tries < 6
+        candidate = Game.FindRandomActorFromRef(Self, 1800.0)
+        if candidate != None && !IsFriendlyTarget(candidate)
+            if candidate.IsHostileToActor(playerRef) || candidate.IsHostileToActor(Self)
+                RetaliateAgainst(candidate)
+                return
+            endif
+        endif
+        tries += 1
+    endwhile
+EndFunction
+
 Event OnHit(ObjectReference akTarget, ObjectReference akAggressor, Form akSource, Projectile akProjectile, bool abPowerAttack, bool abSneakAttack, bool abBashAttack, bool abHitBlocked, string asMaterialName)
-    RegisterForHitEvent(Self)
-    RetaliateAgainst(akAggressor as Actor)
+    RegisterCombatEvents()
+    Actor aggressor = akAggressor as Actor
+    if akTarget == Self
+        RetaliateAgainst(aggressor)
+    elseif akTarget == Game.GetPlayer() && IsRecruited()
+        RetaliateAgainst(aggressor)
+    endif
 EndEvent
 
 Event OnCombatStateChanged(Actor akTarget, int aeCombatState)
@@ -158,24 +214,33 @@ Event OnTimer(int aiTimerID)
         return
     endif
 
-    if mode != None && mode.GetValue() > 0.0
+    if IsRecruited()
         Actor playerRef = Game.GetPlayer()
         if !IsPlayerTeammate()
             SetPlayerTeammate(true, true, true)
         endif
+        ClearVanillaCommandMode()
 
-        if playerRef.IsInCombat()
-            AssistPlayerAgainst(playerRef.GetCombatTarget())
+        Actor playerTarget = playerRef.GetCombatTarget()
+        if playerTarget != None
+            AssistPlayerAgainst(playerTarget)
         endif
 
-        if mode.GetValue() == 1.0 && !IsInCombat() && !playerRef.IsInCombat()
-            if GetWorldSpace() != playerRef.GetWorldSpace() || (GetWorldSpace() == None && GetParentCell() != playerRef.GetParentCell()) || GetDistance(playerRef) > 3000.0
+        FindAndAttackNearbyHostile()
+
+        if mode.GetValue() == 1.0 && !IsInCombat()
+            ; Keep vanilla follower actor-value state synchronized with our package.
+            FollowerFollow()
+            if GetWorldSpace() != playerRef.GetWorldSpace() || (GetWorldSpace() == None && GetParentCell() != playerRef.GetParentCell()) || GetDistance(playerRef) > 2500.0
                 MoveTo(playerRef, 90.0, -90.0, 0.0)
                 MoveToNearestNavmeshLocation()
                 EvaluatePackage(true)
             endif
+        elseif mode.GetValue() == 2.0 && !IsInCombat()
+            FollowerWait()
         endif
     endif
 
+    RegisterCombatEvents()
     StartTimer(1.0, 1)
 EndEvent
