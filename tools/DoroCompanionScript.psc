@@ -5,6 +5,10 @@ Message commands
 Sound voice
 Bool menuOpen = false
 Faction playerFaction
+Faction workshopNPCFaction
+Faction playerAllyFaction
+Faction playerFriendFaction
+Faction minutemenFaction
 
 Function ClearVanillaCommandMode()
     ; Native companion command mode can intercept activation before our menu.
@@ -28,6 +32,10 @@ Function Setup()
     commands = Game.GetFormFromFile(0x00000805, "DoroFollower.esp") as Message
     voice = Game.GetFormFromFile(0x00000809, "DoroFollower.esp") as Sound
     playerFaction = Game.GetForm(0x0001C21C) as Faction
+    workshopNPCFaction = Game.GetForm(0x000337F3) as Faction
+    playerAllyFaction = Game.GetForm(0x00106C30) as Faction
+    playerFriendFaction = Game.GetForm(0x00106C31) as Faction
+    minutemenFaction = Game.GetForm(0x00068043) as Faction
 
     ; Script-only activation path. Keep the prompt, block broken native dialogue.
     BlockActivation(true, false)
@@ -35,6 +43,7 @@ Function Setup()
     SetEssential(true)
     SetRelationshipRank(Game.GetPlayer(), 4)
     EnableAI(true)
+    IgnoreFriendlyHits(true)
     ClearVanillaCommandMode()
 
     if IsRecruited()
@@ -114,12 +123,14 @@ Function DoCommand(int choice)
     if choice == 10
         mode.SetValue(1.0)
         SetPlayerTeammate(true, true, true)
+        IgnoreFriendlyHits(true)
         ClearVanillaCommandMode()
         FollowerFollow()
         EvaluatePackage(false)
     elseif choice == 20
         mode.SetValue(2.0)
         SetPlayerTeammate(true, true, true)
+        IgnoreFriendlyHits(true)
         ClearVanillaCommandMode()
         FollowerWait()
         EvaluatePackage(false)
@@ -127,6 +138,7 @@ Function DoCommand(int choice)
         if !IsPlayerTeammate()
             SetPlayerTeammate(true, true, true)
         endif
+        IgnoreFriendlyHits(true)
         ClearVanillaCommandMode()
         OpenInventory(true)
     elseif choice == 40
@@ -149,6 +161,18 @@ Bool Function IsFriendlyTarget(Actor target)
     if playerFaction != None && target.IsInFaction(playerFaction)
         return true
     endif
+    if workshopNPCFaction != None && target.IsInFaction(workshopNPCFaction)
+        return true
+    endif
+    if playerAllyFaction != None && target.IsInFaction(playerAllyFaction)
+        return true
+    endif
+    if playerFriendFaction != None && target.IsInFaction(playerFriendFaction)
+        return true
+    endif
+    if minutemenFaction != None && target.IsInFaction(minutemenFaction)
+        return true
+    endif
     if target.GetRelationshipRank(Game.GetPlayer()) > 0
         return true
     endif
@@ -160,9 +184,7 @@ Function RetaliateAgainst(Actor target)
         return
     endif
 
-    ; Critical: once combat starts, do NOT EvaluatePackage or call follower
-    ; state functions here. Those can reset the AI package stack and immediately
-    ; cancel the combat state, producing rapid combat/health-bar flicker.
+    ; Once combat starts, do NOT EvaluatePackage or call follower state functions.
     EnableAI(true)
     StartCombat(target, true)
 EndFunction
@@ -206,9 +228,13 @@ Event OnHit(ObjectReference akTarget, ObjectReference akAggressor, Form akSource
     endif
 EndEvent
 
-; Do not force StartCombat again from OnCombatStateChanged. That event fires while
-; combat state is transitioning and feeding it back into StartCombat can oscillate
-; the actor between combat/package states.
+Event OnCombatStateChanged(Actor akTarget, int aeCombatState)
+    ; Settlement safety guard. Do not feed enemy combat transitions back into
+    ; StartCombat; only cancel combat if the selected target is player-friendly.
+    if aeCombatState > 0 && IsFriendlyTarget(akTarget)
+        StopCombat()
+    endif
+EndEvent
 
 Event OnTimer(int aiTimerID)
     if aiTimerID != 1
